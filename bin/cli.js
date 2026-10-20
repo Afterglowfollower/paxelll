@@ -53,6 +53,7 @@ Usage:
                             [--proxy URL] [--results URL] [--token T]
                             [--git-repo PATH] [--author-email EMAIL]
                             [--out DIR] [--no-mock] [--no-enrich-git]
+  ai-session-audit --doctor  # self-test the install and the mock protocol
 
 With no --proxy/--results, a local mock backend is started on 127.0.0.1:${PORT}
 so the whole run stays on this machine. Point --proxy and --results at your own
@@ -61,7 +62,89 @@ service to upload for real.
 Requires Python 3.9+ and Node 18+.`);
 }
 
+
+async function runDoctor() {
+  const results = [];
+  const record = (name, ok, detail = "") => {
+    results.push({ name, ok, detail });
+    console.log(`${ok ? "PASS" : "FAIL"}  ${name}${detail ? "  " + detail : ""}`);
+  };
+
+  record("node", Number(process.versions.node.split(".")[0]) >= 18, `v${process.versions.node}`);
+
+  const probe = spawnSync(python, ["-c", "import sys;print('%d.%d.%d' % sys.version_info[:3])"], { encoding: "utf8" });
+  record("python", probe.status === 0, (probe.stdout || "").trim());
+
+  for (const file of ["runner.py", "transport.py", "git_enrich.py", "mock-server.mjs", "pipeline/paxel_reproduction.py"]) {
+    record(`file ${file}`, existsSync(join(ROOT, file)));
+  }
+
+  if (!(await portFree(PORT))) {
+    record("mock port", false, `port ${PORT} busy; set AUDIT_MOCK_PORT`);
+    return results;
+  }
+
+  const server = spawn(process.execPath, [join(ROOT, "mock-server.mjs")], {
+    cwd: ROOT,
+    env: { ...process.env, PORT: String(PORT) },
+    stdio: ["ignore", "ignore", "inherit"],
+  });
+  try {
+    const base = `http://127.0.0.1:${PORT}`;
+    record("mock boot", await waitForMock(base));
+
+    const health = await fetch(`${base}/health`).then((r) => r.json()).catch(() => ({}));
+    record("GET /health", health.signatures_loaded === true);
+
+    const session = await fetch(`${base}/api/v1/scoring_sessions`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-yc-token": "doctor" },
+      body: JSON.stringify({ git_remote: null, since_epoch: null, client_nonce: "doctor" }),
+    }).then((r) => r.json()).catch(() => ({}));
+    record("POST /api/v1/scoring_sessions", Boolean(session.id), session.id || "");
+
+    if (session.id) {
+      const manifest = await fetch(`${base}/api/v1/scoring_sessions/${session.id}/manifest`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ episode_manifest: { "episode:doctor": ["s1"] } }),
+      });
+      record("POST /manifest", manifest.status === 200);
+    }
+
+    const message = await fetch(`${base}/v1/messages`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-api-key": "doctor", "x-paxel-prompt-id": "episode_scoring" },
+      body: JSON.stringify({ model: "doctor", max_tokens: 16, messages: [{ role: "user", content: "ping" }] }),
+    }).then((r) => r.json()).catch(() => ({}));
+    const text = (message.content || []).map((b) => b.text || "").join("");
+    record("POST /v1/messages", Boolean(message.id) && /yc_verify:/.test(text), message.id || "");
+
+    const upload = await fetch(`${base}/api/v1/results`, {
+      method: "POST",
+      headers: { "content-type": "application/octet-stream", "x-yc-token": "doctor", "x-idempotency-key": "doctor" },
+      body: JSON.stringify({ probe: true }),
+    });
+    record("POST /api/v1/results", upload.status === 201);
+  } finally {
+    server.kill("SIGTERM");
+  }
+
+  const failed = results.filter((r) => !r.ok);
+  console.log(`\n${failed.length ? `${failed.length} check(s) failed` : "all checks passed"}`);
+  return results;
+}
+
 const argv = process.argv.slice(2);
+if (argv.includes("--doctor")) {
+  const pythonPath = findPython();
+  if (!pythonPath) {
+    console.error("FAIL  python  not found (need Python 3.9+)");
+    process.exit(2);
+  }
+}
+const doctorMode = argv.includes("--doctor");
+
 if (argv.includes("--help") || argv.includes("-h") || argv.length === 0) {
   usage();
   process.exit(0);
@@ -73,6 +156,10 @@ if (argv.includes("--version") || argv.includes("-v")) {
 }
 
 const python = findPython();
+if (doctorMode) {
+  const results = await runDoctor();
+  process.exit(results.some((r) => !r.ok) ? 1 : 0);
+}
 if (!python) {
   console.error("ai-session-audit needs Python 3.9+ on PATH (set PYTHON to an interpreter to override).");
   process.exit(2);
