@@ -48,6 +48,15 @@ npm i -g ai-session-audit && ai-session-audit /你的/项目目录
 ai-session-audit /项目 --proxy http://你的后端 --results http://你的后端/api/v1/results --token xxx
 ```
 
+## 报告
+
+每次跑完会写 `report.html`（评分完成后生成，含片段标题、五轴分数、叙事、git 证据）；
+管线自己那份报表会保留为 `pipeline-report.html`。不重新跑也能刷新：
+
+```bash
+npx ai-session-audit /项目 --out 输出目录 --report-only
+```
+
 ## 用真模型跑（可选，分数才不是 mock）
 
 本地代理支持把 `/v1/messages` 转发给任意 OpenAI 兼容端点，默认 GLM：

@@ -30,6 +30,7 @@ sys.path.insert(0, str(HERE))
 
 from transport import Transport, TransportError  # noqa: E402
 import git_enrich  # noqa: E402
+import report as report_mod  # noqa: E402
 
 PROMPT_IDS = ["session_narrative", "session_narrative_merge", "decision_classifier", "episode_scoring"]
 EPISODE_SYSTEM = HERE / "prompts" / "episode_scoring.txt"
@@ -217,6 +218,7 @@ def main() -> int:
     parser.add_argument("--limit", type=int, default=5, help="episodes to score")
     parser.add_argument("--out", type=Path, default=Path("paxel-local-out"))
     parser.add_argument("--reuse", action="store_true", help="reuse existing pipeline output")
+    parser.add_argument("--report-only", action="store_true", help="re-render report.html from existing artifacts")
     parser.add_argument("--git-repo", type=Path, help="repository for git evidence (defaults to the project)")
     parser.add_argument("--author-email", help="only credit commits by this author")
     parser.add_argument("--no-enrich-git", action="store_true", help="skip local git enrichment")
@@ -225,6 +227,10 @@ def main() -> int:
 
     started = time.time()
     outdir = args.out.resolve()
+    if args.report_only:
+        written = report_mod.render(outdir)
+        print(f"[report] {written}")
+        return 0
     if not args.reuse:
         run_pipeline(args.project.resolve(), args.days, outdir)
     durations = {"pipeline": time.time() - started}
@@ -402,6 +408,14 @@ def main() -> int:
         "payload_path": str(outdir / "results-payload.json"),
     }
     (outdir / "results-payload.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    # The pipeline rendered its own report before any score existed; keep it and
+    # write the scored report over report.html.
+    pipeline_report = outdir / "report.html"
+    if pipeline_report.exists():
+        pipeline_report.replace(outdir / "pipeline-report.html")
+    written = report_mod.render(outdir)
+    print(f"[report] {written}")
     (outdir / "run-summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
     print("[done]", outdir / "run-summary.json")
     return 0

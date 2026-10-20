@@ -15,7 +15,8 @@
     "pipeline/",
     "prompts/",
     "contracts/",
-    "README.md"
+    "README.md",
+    "report.py"
   ],
   "engines": {
     "node": ">=18"
