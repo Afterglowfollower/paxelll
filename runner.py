@@ -152,7 +152,11 @@ def build_results(
             "session_modified_at": session.get("ended_at"),
             "is_subagent": bool(session.get("parent_id")),
             "agent_type": session.get("source"),
-            "session_events": (session.get("events") or [])[:400],
+            "session_events": [
+                {k: (str(v)[:500] if isinstance(v, str) else v) for k, v in event.items()}
+                for event in (session.get("events") or [])[:60]
+                if isinstance(event, dict)
+            ],
             "models_used": session.get("models_used"),
         }
     session_metadata = {k: {kk: vv for kk, vv in v.items() if vv not in (None, [], {})} for k, v in session_metadata.items()}
@@ -216,6 +220,7 @@ def main() -> int:
     parser.add_argument("--git-repo", type=Path, help="repository for git evidence (defaults to the project)")
     parser.add_argument("--author-email", help="only credit commits by this author")
     parser.add_argument("--no-enrich-git", action="store_true", help="skip local git enrichment")
+    parser.add_argument("--all-narratives", action="store_true", help="narrate every session, not just scored episodes")
     args = parser.parse_args()
 
     started = time.time()
@@ -267,6 +272,16 @@ def main() -> int:
     narrative_system = NARRATIVE_SYSTEM.read_text(encoding="utf-8")
     merge_system = MERGE_SYSTEM.read_text(encoding="utf-8")
     narrative_inputs = load(outdir, "narrative_inputs.json", {})
+    # Only narrate sessions that belong to the episodes we are about to score,
+    # unless the caller asks for every session.
+    if not args.all_narratives:
+        wanted = set()
+        for entry in list(episode_inputs.values())[: args.limit]:
+            for session in entry.get("sessions") or []:
+                if session.get("id"):
+                    wanted.add(str(session["id"]))
+        if wanted:
+            narrative_inputs = {k: v for k, v in narrative_inputs.items() if k in wanted}
     narratives: dict[str, str] = {}
     for index, (narr_session_id, entry) in enumerate(narrative_inputs.items(), 1):
         parts = [part for part in (entry.get("parts") or []) if part.strip()]

@@ -5,6 +5,12 @@ import { createServer } from "node:http";
 import { appendFileSync, mkdirSync } from "node:fs";
 
 const PORT = Number(process.env.PORT || 8899);
+// Optional: forward /v1/messages to a real model so scoring stops being mock
+// data. Any OpenAI-compatible chat-completions endpoint works; GLM is the
+// default because that is what this was tested against.
+const UPSTREAM_URL = process.env.UPSTREAM_URL || (process.env.GLM_API_KEY ? "https://open.bigmodel.cn/api/paas/v4/chat/completions" : "");
+const UPSTREAM_KEY = process.env.GLM_API_KEY || process.env.UPSTREAM_KEY || "";
+const UPSTREAM_MODEL = process.env.UPSTREAM_MODEL || process.env.GLM_MODEL || "";
 const LOG = process.env.LOG || "/tmp/paxel-capture/requests.ndjson";
 mkdirSync("/tmp/paxel-capture", { recursive: true });
 
@@ -24,6 +30,41 @@ const SCORING_JSON = {
 };
 
 let nonceCounter = 0;
+
+async function upstreamText(body) {
+  const messages = [];
+  if (body.system) {
+    messages.push({
+      role: "system",
+      content: typeof body.system === "string" ? body.system : JSON.stringify(body.system),
+    });
+  }
+  for (const m of body.messages || []) {
+    messages.push({
+      role: m.role || "user",
+      content: typeof m.content === "string" ? m.content : JSON.stringify(m.content),
+    });
+  }
+  const res = await fetch(UPSTREAM_URL, {
+    method: "POST",
+    headers: { authorization: `Bearer ${UPSTREAM_KEY}`, "content-type": "application/json" },
+    body: JSON.stringify({
+      model: UPSTREAM_MODEL || body.model,
+      messages,
+      temperature: typeof body.temperature === "number" ? body.temperature : 0,
+      // Reasoning models spend the budget on reasoning first; keep a floor so a
+      // small client-side max_tokens does not return an empty answer.
+      max_tokens: Math.max(body.max_tokens || 1200, 4096),
+    }),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const detail = JSON.stringify(json).slice(0, 300);
+    throw new Error(`upstream HTTP ${res.status}: ${detail}`);
+  }
+  const text = json.choices?.[0]?.message?.content ?? "";
+  return { text, usage: json.usage || null };
+}
 
 function anthropicMessage(model, extraText = "") {
   nonceCounter += 1;
@@ -55,6 +96,12 @@ function readBodyRaw(req) {
 const server = createServer(async (req, res) => {
   const buf = await readBodyRaw(req);
   const body = buf.toString("utf8");
+  let parsedBody = {};
+  try {
+    parsedBody = JSON.parse(body);
+  } catch {
+    parsedBody = {};
+  }
   const path = (req.url || "/").split("?")[0];
   let status = 200;
   let payload = {};
@@ -74,6 +121,30 @@ const server = createServer(async (req, res) => {
   } else if (req.method === "POST" && path === "/v1/messages") {
     const promptId = req.headers["x-paxel-prompt-id"] || "";
     if (promptId === "session_narrative" || promptId === "session_narrative_merge") {
+      if (UPSTREAM_URL && UPSTREAM_KEY) {
+        try {
+          const { text, usage } = await upstreamText(parsedBody);
+          nonceCounter += 1;
+          payload = {
+            id: `msg_up_${nonceCounter}`,
+            type: "message",
+            role: "assistant",
+            model: UPSTREAM_MODEL || model,
+            content: [
+              {
+                type: "text",
+                text: `${text}\n<!-- yc_verify:req_up_${nonceCounter}:hmac_up_${nonceCounter} -->`,
+              },
+            ],
+            stop_reason: "end_turn",
+            stop_sequence: null,
+            usage: usage || { input_tokens: 0, output_tokens: 0 },
+          };
+        } catch (error) {
+          status = 502;
+          payload = { error: String(error).slice(0, 400), upstream: true };
+        }
+      } else {
       nonceCounter += 1;
       const prose = [
         "## Goal",
@@ -97,12 +168,35 @@ const server = createServer(async (req, res) => {
         stop_sequence: null,
         usage: { input_tokens: 80, output_tokens: 40 },
       };
+      }
     } else {
-    let model = null;
-    try {
-      model = JSON.parse(body).model;
-    } catch {}
-    payload = anthropicMessage(model);
+    const model = parsedBody.model || null;
+    if (UPSTREAM_URL && UPSTREAM_KEY) {
+      try {
+        const { text, usage } = await upstreamText(parsedBody);
+        nonceCounter += 1;
+        payload = {
+          id: `msg_up_${nonceCounter}`,
+          type: "message",
+          role: "assistant",
+          model: UPSTREAM_MODEL || model,
+          content: [
+            {
+              type: "text",
+              text: `${text}\n<!-- yc_verify:req_up_${nonceCounter}:hmac_up_${nonceCounter} -->`,
+            },
+          ],
+          stop_reason: "end_turn",
+          stop_sequence: null,
+          usage: usage || { input_tokens: 0, output_tokens: 0 },
+        };
+      } catch (error) {
+        status = 502;
+        payload = { error: String(error).slice(0, 400), upstream: true };
+      }
+    } else {
+      payload = anthropicMessage(model);
+    }
     }
   } else if (req.method === "POST" && path === "/api/v1/scoring_sessions") {
     status = 201;
