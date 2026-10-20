@@ -48,6 +48,22 @@ npm i -g ai-session-audit && ai-session-audit /你的/项目目录
 ai-session-audit /项目 --proxy http://你的后端 --results http://你的后端/api/v1/results --token xxx
 ```
 
+## 用真模型跑（可选，分数才不是 mock）
+
+本地代理支持把 `/v1/messages` 转发给任意 OpenAI 兼容端点，默认 GLM：
+
+```bash
+export GLM_API_KEY=...            # 只在 shell 里，别写进仓库
+export GLM_MODEL=glm-4.5          # 可选，默认取 --model
+npx ai-session-audit /项目 --limit 1 --model glm-4.5
+```
+
+要点：
+
+- 不设 `GLM_API_KEY` 时走内置固定回答，只验证链路；设了之后叙事和评分都是真模型输出。
+- 推理模型（glm-4.5）会把 token 先花在 reasoning 上，代理里已把 `max_tokens` 下限抬到 4096，否则会返回空文本。
+- 默认只给「即将评分的片段」所涉及的会话生成叙事；`--all-narratives` 才会跑全部。
+
 ## 快速开始（完全本地）
 
 ```bash
