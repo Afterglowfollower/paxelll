@@ -44,6 +44,7 @@ h2 { font-size:16px; margin:28px 0 12px; }
 .bar i { display:block; height:100%; background:var(--accent); }
 details { margin-top:10px; }
 summary { cursor:pointer; color:var(--accent); font-size:13px; }
+p.prose { margin:10px 0; font-size:14px; }
 pre.narr { white-space:pre-wrap; word-break:break-word; background:var(--bg); border:1px solid var(--line);
   border-radius:8px; padding:12px; font-size:13px; max-height:420px; overflow:auto; }
 .muted { color:var(--muted); }
@@ -81,6 +82,12 @@ def render(outdir: Path) -> Path:
 
     scores = payload.get("episode_scores") or []
     narratives = payload.get("session_summaries") or {}
+    sidecar = outdir / "narratives.json"
+    if sidecar.exists():
+        try:
+            narratives = {**narratives, **json.loads(sidecar.read_text(encoding="utf-8"))}
+        except json.JSONDecodeError:
+            pass
     metadata = payload.get("session_metadata") or {}
     nonces = payload.get("nonces") or []
 
@@ -135,6 +142,14 @@ def render(outdir: Path) -> Path:
             f'request {esc(score.get("request_id") or "-")} · sessions {esc(", ".join(session_ids) or "-")}</div>'
         )
         body.append(axis_rows(score.get("scores") or {}))
+
+        assessment = score.get("assessment") or {}
+        if assessment.get("facts"):
+            body.append(f'<p class="prose"><b>What happened.</b> {esc(assessment["facts"])}</p>')
+        if assessment.get("interpretation"):
+            body.append(f'<p class="prose"><b>What it suggests.</b> {esc(assessment["interpretation"])}</p>')
+        if assessment.get("counterweight"):
+            body.append(f'<p class="prose muted"><b>What argues against it.</b> {esc(assessment["counterweight"])}</p>')
         for sid in session_ids:
             narrative = narratives.get(sid)
             if narrative:

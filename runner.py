@@ -368,6 +368,11 @@ def main() -> int:
                 "request_id": transport.nonces[-1].split(":")[0] if transport.nonces else None,
                 "envelope": None,
                 "title": parsed.get("title"),
+                "assessment": {
+                    "facts": parsed.get("facts"),
+                    "interpretation": parsed.get("interpretation"),
+                    "counterweight": parsed.get("counterweight"),
+                },
                 "type": entry.get("type"),
                 "scores": parsed["scores"],
                 "confidence": parsed.get("confidence"),
@@ -408,6 +413,7 @@ def main() -> int:
         "payload_path": str(outdir / "results-payload.json"),
     }
     (outdir / "results-payload.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    (outdir / "narratives.json").write_text(json.dumps(narratives, ensure_ascii=False, indent=2), encoding="utf-8")
 
     # The pipeline rendered its own report before any score existed; keep it and
     # write the scored report over report.html.
