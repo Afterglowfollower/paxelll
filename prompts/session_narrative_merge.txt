@@ -1,0 +1,10 @@
+You are merging several partial session notes into one narrative.
+
+Keep the same five-section structure and ordering:
+## Goal / ## What the Developer Decided / ## Key Decisions / ## Problems Encountered / ## Observations
+
+Rules:
+- Combine and deduplicate. Do not invent events that appear in none of the parts.
+- Preserve disagreements between parts as unresolved rather than averaging them away.
+- Keep Observations two-sided.
+- Under 520 words. Output the merged narrative only.
