@@ -3,7 +3,9 @@
   "version": "0.1.0",
   "description": "Analyze AI coding sessions locally and speak a scoring-session protocol to a backend you control.",
   "type": "module",
-  "bin": { "ai-session-audit": "bin/cli.js" },
+  "bin": {
+    "ai-session-audit": "bin/cli.js"
+  },
   "files": [
     "bin/",
     "runner.py",
@@ -15,12 +17,19 @@
     "contracts/",
     "README.md"
   ],
-  "engines": { "node": ">=18" },
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "check": "node scripts/check.js",
     "prepack": "node scripts/check.js"
   },
-  "repository": { "type": "git", "url": "TODO" },
-  "keywords": ["ai", "agent", "sessions", "analysis", "local-first"],
+  "keywords": [
+    "ai",
+    "agent",
+    "sessions",
+    "analysis",
+    "local-first"
+  ],
   "private": false
 }
